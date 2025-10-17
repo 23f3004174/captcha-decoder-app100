@@ -1,63 +1,52 @@
-Overview
-This is a simple web app that lets you upload an image of a CAPTCHA and automatically decodes the text using OCR. It uses:
-- Flask for the web server
-- Pillow (PIL) for image handling and basic preprocessing
-- pytesseract to interface with the Tesseract OCR engine
+# CAPTCHA OCR Decoder
 
-Setup
+## Overview
+This is a simple web app that lets you upload a CAPTCHA image and decodes the text automatically using Python’s pytesseract (Tesseract OCR) library. The app provides an image upload form and displays the detected text on the page after processing.
+
+Key points:
+- Built with Flask (Python)
+- Uses Pillow for image handling and light preprocessing
+- Uses pytesseract to run OCR (requires Tesseract OCR binary installed on the system)
+
+## Setup
 1) Prerequisites
-- Python 3.9+ recommended
-- Tesseract OCR engine must be installed on your system
+- Python 3.8+
+- Tesseract OCR binary installed on your system and accessible on PATH
 
 Install Tesseract:
 - macOS (Homebrew):
   brew install tesseract
 - Ubuntu/Debian:
-  sudo apt-get update
-  sudo apt-get install -y tesseract-ocr
-- Windows:
-  - Download from: https://github.com/tesseract-ocr/tesseract
-  - Install, then note the path to tesseract.exe (e.g., C:\Program Files\Tesseract-OCR\tesseract.exe)
+  sudo apt-get update && sudo apt-get install -y tesseract-ocr
+- Windows (Chocolatey):
+  choco install tesseract
+
+If Tesseract is installed in a non-standard location, set an environment variable before running:
+- macOS/Linux:
+  export TESSERACT_CMD=/full/path/to/tesseract
+- Windows (PowerShell):
+  $env:TESSERACT_CMD="C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 2) Python dependencies
-It’s recommended to use a virtual environment.
+Install required packages:
+- pip install Flask Pillow pytesseract
 
-- Create and activate a venv:
-  python -m venv .venv
-  # Windows
-  .venv\Scripts\activate
-  # macOS/Linux
-  source .venv/bin/activate
+## Usage
+1) Run the app:
+- python index.html
 
-- Install packages:
-  pip install flask pillow pytesseract
+2) Open the browser to:
+- http://127.0.0.1:5000
 
-3) Configure Tesseract path (Windows or custom path)
-If Tesseract isn’t on your PATH, set an environment variable to its executable:
+3) Upload a CAPTCHA image and click “Decode”.
+- The page will show a preview of the image and the detected text.
 
-- Windows (PowerShell):
-  setx TESSERACT_CMD "C:\Program Files\Tesseract-OCR\tesseract.exe"
-  # Then restart your terminal or system to apply
+Notes:
+- For best results, use clear, high-contrast images. The app applies grayscale + thresholding and uses an alphanumeric whitelist to improve OCR on typical CAPTCHAs.
 
-- macOS/Linux (temporary for current shell):
-  export TESSERACT_CMD="$(which tesseract)"
-
-Usage
-1) Run the app
-python index.html
-
-By default it starts on http://localhost:8000
-
-2) Use the app
-- Open the URL in your browser.
-- Use the image upload form to select a CAPTCHA image (PNG/JPG/etc).
-- Click “Decode Text”.
-- The page will show a preview of the uploaded image and the detected text.
-
-Notes
-- The app applies simple preprocessing (grayscale, autocontrast, threshold) to improve OCR.
-- OCR is configured with a whitelist of alphanumeric characters and page segmentation mode suitable for single-line text (PSM 7).
-- If you see “Tesseract not found” errors, ensure Tesseract is installed and your TESSERACT_CMD or PATH is properly configured.
-
-Security/Privacy
-- Uploaded images are processed in-memory only and are not stored on disk by the application.
+## Improvements from Round 1
+- Added preprocessing pipeline (grayscale + dynamic invert + thresholding) for better OCR accuracy on noisy CAPTCHAs.
+- Tuned Tesseract configuration with page segmentation modes (PSM 7 with fallback to 8) and an alphanumeric whitelist for higher precision.
+- Image preview is now displayed using an in-memory data URL; no files are written to disk.
+- Improved validation and error messages for unsupported formats and empty uploads.
+- Single-file app with clearer styling and layout, while keeping setup simple.
