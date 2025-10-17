@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<!--
+This file contains a complete Flask web app that serves an HTML form for uploading a CAPTCHA image
+and uses pytesseract (Python OCR) to decode the text. Run with: python index.html
+-->
+# -*- coding: utf-8 -*-
+from flask import Flask, request, render_template_string
+from PIL import Image, ImageOps
+import pytesseract
+import base64
+from io import BytesIO
+import os
+
+# Optional: allow specifying tesseract binary path via environment variable (useful on Windows)
+if os.getenv("TESSERACT_CMD"):
+    pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD")
+
+app = Flask(__name__)
+
+PAGE_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>CAPTCHA OCR Decoder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --muted: #9ca3af;
+      --text: #e5e7eb;
+      --accent: #38bdf8;
+      --danger: #ef4444;
+      --ok: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #0b1220, #0f172a);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+      display: grid;
+      place-items: start center;
+    }
+    .wrap {
+      width: min(860px, 95vw);
+      margin: 4rem 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+    header {
+      padding: 22px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(0,0,0,0.25);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .badge {
+      background: rgba(56,189,248,0.15);
+      color: var(--accent);
+      border: 1px solid rgba(56,189,248,0.4);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+      padding: 22px;
+    }
+    form {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      background: rgba(17,24,39,0.6);
+      border: 1px dashed rgba(255,255,255,0.16);
+      border-radius: 12px;
+    }
+    label {
+      font-size: 14px;
+      color: var(--muted);
+    }
+    input[type="file"] {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(0,0,0,0.2);
+      color: var(--text);
+    }
+    button {
+      width: fit-content;
+      padding: 10px 14px;
+      background: linear-gradient(180deg, #38bdf8, #0ea5e9);
+      color: #071824;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.03s ease-in-out, filter 0.2s ease;
+    }
+    button:hover { filter: brightness(1.05); }
+    button:active { transform: translateY(1px); }
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .card {
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(17,24,39,0.55);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .card h3 {
+      margin: 0;
+      padding: 14px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      color: var(--muted);
+      background: rgba(0,0,0,0.2);
+    }
+    .card .body {
+      padding: 16px;
+    }
+    .preview {
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(0,0,0,0.15);
+      border-radius: 10px;
+      border: 1px dashed rgba(255,255,255,0.1);
+    }
+    .preview img {
+      max-width: 100%;
+      max-height: 240px;
+      object-fit: contain;
+      image-rendering: pixelated;
+      border-radius: 6px;
+      box-shadow: 0 8px 26px rgba(0,0,0,0.35);
+    }
+    .result {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 18px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 14px;
+      color: #c7f9cc;
+      word-wrap: anywhere;
+    }
+    .empty {
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.25);
+      border: 1px dashed rgba(255,255,255,0.1);
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .error {
+      padding: 12px 14px;
+      border: 1px solid rgba(239,68,68,0.45);
+      background: rgba(239,68,68,0.12);
+      color: #fecaca;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+    footer {
+      padding: 14px 16px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      text-align: right;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (min-width: 860px) {
+      main { grid-template-columns: 1.2fr 1fr; }
+      .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <span class="badge">Python + OCR</span>
+      <h1>CAPTCHA OCR Decoder</h1>
+    </header>
+    <main>
+      <section>
+        <form method="post" enctype="multipart/form-data">
+          <div>
+            <label for="image">Upload a CAPTCHA image</label>
+            <input required id="image" name="image" type="file" accept="image/*">
+            <div class="hint">Accepted formats: PNG, JPG, GIF, WEBP, BMP. Images remain in-memory (not stored on disk).</div>
+          </div>
+          <div>
+            <button type="submit">Decode Text</button>
+          </div>
+        </form>
+
+        {% if error %}
+          <div class="error" role="alert">{{ error }}</div>
+        {% endif %}
+
+        {% if decoded_text is not none %}
+        <div class="card" style="margin-top:16px">
+          <h3>Detected Text</h3>
+          <div class="body">
+            {% if decoded_text.strip() %}
+              <div class="result">{{ decoded_text }}</div>
+            {% else %}
+              <div class="empty">No text detected. Try a clearer image or different preprocessing.</div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="row">
+        <div class="card">
+          <h3>Uploaded Preview</h3>
+          <div class="body">
+            {% if preview_data_url %}
+              <div class="preview"><img src="{{ preview_data_url }}" alt="Uploaded preview"></div>
+            {% else %}
+              <div class="empty">No image uploaded yet.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>How it works</h3>
+          <div class="body">
+            <ul>
+              <li>Server uses Python's pytesseract (Tesseract OCR) to decode characters.</li>
+              <li>Simple preprocessing (grayscale, autocontrast, threshold) to improve legibility.</li>
+              <li>OCR focuses on alphanumeric characters (common in CAPTCHAs).</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer>
+      Powered by Flask, Pillow, and Tesseract OCR (pytesseract)
+    </footer>
+  </div>
+</body>
+</html>
+"""
+
+def preprocess_image(img: Image.Image) -> Image.Image:
+    # Convert to grayscale and improve contrast
+    img = img.convert("L")
+    img = ImageOps.autocontrast(img)
+    # Simple global thresholding
+    # Note: Keep mode "L" to retain anti-aliased edges for Tesseract
+    threshold = 160
+    img = img.point(lambda p: 255 if p >= threshold else 0)
+    return img
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    decoded_text = None
+    error = None
+    preview_data_url = None
+
+    if request.method == "POST":
+        file = request.files.get("image")
+        if not file or not file.filename:
+            error = "Please choose an image file to upload."
+        else:
+            try:
+                file_bytes = file.read()
+                # Build preview
+                b64 = base64.b64encode(file_bytes).decode("ascii")
+                mime = file.mimetype or "image/png"
+                if not mime.startswith("image/"):
+                    # Try to guess common types from extension as fallback
+                    name = (file.filename or "").lower()
+                    if name.endswith(".png"): mime = "image/png"
+                    elif name.endswith(".jpg") or name.endswith(".jpeg"): mime = "image/jpeg"
+                    elif name.endswith(".gif"): mime = "image/gif"
+                    elif name.endswith(".bmp"): mime = "image/bmp"
+                    elif name.endswith(".webp"): mime = "image/webp"
+                    else: mime = "image/png"
+                preview_data_url = f"data:{mime};base64,{b64}"
+
+                # Open and preprocess image
+                img = Image.open(BytesIO(file_bytes))
+                img = preprocess_image(img)
+
+                # OCR with whitelist tuned for common CAPTCHA characters
+                config = "--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+                decoded_text = pytesseract.image_to_string(img, config=config).strip()
+
+            except pytesseract.pytesseract.TesseractNotFoundError:
+                error = ("Tesseract OCR binary not found. Please install Tesseract and ensure it's on your PATH, "
+                         "or set environment variable TESSERACT_CMD to the tesseract executable.")
+            except Exception as e:
+                error = f"Failed to process image: {e}"
+
+    return render_template_string(
+        PAGE_TEMPLATE,
+        decoded_text=decoded_text,
+        preview_data_url=preview_data_url,
+        error=error
+    )
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8000"))
+    app.run(host="0.0.0.0", port=port, debug=True)
